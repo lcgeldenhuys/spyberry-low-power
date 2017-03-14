@@ -28,7 +28,7 @@ SYSTEM_MODE(MANUAL);
 // Time between sensor readings in seconds
 #define SENSOR_READING_INTERVAL 60*2
 // We will publish the entire array when it's full
-#define SENSOR_RECORD_ARRAY_SIZE 3
+#define SENSOR_RECORD_ARRAY_SIZE 1
 typedef struct
 {
     time_t    timestamp_unix;
@@ -50,7 +50,7 @@ HttpClient http;
 
 // Headers currently need to be set at init, useful for API keys etc.
 http_header_t headers[] = {
-    //  { "Content-Type", "application/json" },
+    { "Content-Type", "application/json" },
     //  { "Accept" , "application/json" },
     { "Accept" , "*/*"},
     { NULL, NULL } // NOTE: Always terminate headers will NULL
@@ -69,7 +69,7 @@ void read_and_save_sensor() {
     waitFor(Cellular.ready, 90000); // wait up to 90 seconds for the connection
     if (Cellular.ready()) {
         unsigned long elapsed = millis() - stateTime;
-        Serial.printlnf("Cellular connection at %s AEST (in %lu milliseconds)", Time.timeStr().c_str(), elapsed);
+        Serial.printlnf("Cellular connection at %s UTC (in %lu milliseconds)", Time.timeStr().c_str(), elapsed);
 
         CellularHelperEnvironmentResponse envResp = CellularHelper.getEnvironment(3);
         if (envResp.service.isValid()) {
@@ -84,34 +84,44 @@ void read_and_save_sensor() {
     FuelGauge().quickStart();
     delay(200);
     sensor_record[record_index++].state_of_charge = FuelGauge().getSoC();
-
-    // Request path and body can be set at runtime or at setup.
-    request.hostname = "requestb.in";
-    request.port = 80;
-    request.path = "/10ozwps1";
-
-    // The library also supports sending a body with your request:
-    request.body = "{\"key\":\"value\"}";
-
-    // Get request
-    http.post(request, response, headers);
-    Serial.print("Application>\tResponse status: ");
-    Serial.println(response.status);
-
-    Serial.print("Application>\tHTTP Response Body: ");
-    Serial.println(response.body);
-
 }
 
 void publish_sensor_readings() {
+    request.hostname = "morfpad.hopto.org";
+    request.port = 8080;
+    request.path = "/api/spyberry";
+
     for (int i = 0; i < SENSOR_RECORD_ARRAY_SIZE; i++) {
-        String results = "";
-        results += String::format("%d, %d, %d, %d, %d, %.2f", \
-            sensor_record[i].timestamp_unix, \
-            sensor_record[i].cell_mcc, sensor_record[i].cell_mnc, sensor_record[i].cell_lac, sensor_record[i].cell_ci, \
+      request.body = String::format(
+          "{\"deviceID\":\"%s\", \
+            \"scanDate\":\"%s\", \
+            \"cell_mcc\":\"%d\", \
+            \"cell_mnc\":\"%d\", \
+            \"cell_lac\":\"%d\", \
+            \"cell_ci\":\"%d\", \
+            \"state_of_charge\":\"%.2f\"}", \
+            System.deviceID().c_str(), \
+            Time.format(sensor_record[i].timestamp_unix, TIME_FORMAT_ISO8601_FULL).c_str(), \
+            sensor_record[i].cell_mcc, \
+            sensor_record[i].cell_mnc, \
+            sensor_record[i].cell_lac, \
+            sensor_record[i].cell_ci, \
             sensor_record[i].state_of_charge);
+
+        // Post the data
+        http.post(request, response, headers);
+        Serial.print("Application>\tResponse status: ");
+        Serial.println(response.status);
+
+        // Publish the data
+        String results = "";
+        results += String::format("%d, %.2f", sensor_record[i].timestamp_unix, sensor_record[i].state_of_charge);
         Serial.printlnf("Publishing : %s", results.c_str());
-        Particle.publish("sensor_readings", results);
+        bool success;
+        success = Particle.publish("sensor_readings", results);
+        if (!success) {
+            Serial.println("Publish failed!");
+        }
         delay(1000);
     }
     // Reset sensor_record
@@ -127,7 +137,7 @@ void is_time_to_publish() {
         waitFor(Particle.connected, 60000); // wait up to 60 seconds for a cloud connection
         if (Particle.connected()) {
             unsigned long elapsed = millis() - stateTime;
-            Serial.printlnf("Particle Cloud connection at %s AEST (in %lu milliseconds)", Time.timeStr().c_str(), elapsed);
+            Serial.printlnf("Particle Cloud connection at %s UTC (in %lu milliseconds)", Time.timeStr().c_str(), elapsed);
             publish_sensor_readings();
         }
     }
@@ -136,10 +146,6 @@ void is_time_to_publish() {
 void setup()
 {
     Serial.begin(9600);
-    //delay(4000);
-    Time.zone(10); // Only for console debugging, system functions on UTC exclusively
-    Time.setDSTOffset(1); // Need to implement proper test
-    Time.beginDST();
 
     // Wake from deep sleep with power to cellular modem off.
     // Read sensor, store results to a retained array.
