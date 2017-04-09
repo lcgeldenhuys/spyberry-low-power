@@ -173,7 +173,7 @@ void HttpClient::request(http_request_t &aRequest, http_response_t &aResponse, h
 
     unsigned int bufferPosition = 0;
     unsigned long lastRead = millis();
-    unsigned long firstRead = millis();
+    //unsigned long firstRead = millis();
     bool error = false;
     bool timeout = false;
     uint16_t actualTimeout = aRequest.timeout == 0 ? DEFAULT_TIMEOUT : aRequest.timeout;
